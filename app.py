@@ -3,7 +3,7 @@ import sqlite3
 from flask import Flask, flash, redirect, render_template_string, request, session, url_for
 
 app = Flask(__name__)
-app.secret_key = "clave_escolar_super_segura_2026"
+app.secret_key = "clave_escolar_super_segura_2026_ex"
 
 # Lista oficial de Administradores
 ADMIN_EMAILS = [
@@ -16,13 +16,14 @@ def init_db():
     conn = sqlite3.connect("database.db")
     cursor = conn.cursor()
 
-    # Tabla de Tareas
+    # Tabla de Tareas y Exámenes (añadido el campo 'type')
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS tasks (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             subject TEXT NOT NULL,
             title TEXT NOT NULL,
-            due_date TEXT
+            due_date TEXT,
+            item_type TEXT DEFAULT 'Tarea'
         )
     """)
 
@@ -45,23 +46,23 @@ def init_db():
         )
     """)
 
-    # Insertar tareas iniciales si la tabla está vacía
+    # Insertar elementos iniciales si la tabla está vacía
     cursor.execute("SELECT COUNT(*) FROM tasks")
     if cursor.fetchone()[0] == 0:
         hoy_str = datetime.now().strftime("%Y-%m-")
         initial_tasks = [
-            ("Biología", "Completar trabajo en clase y firmar documentos", hoy_str + "05"),
-            ("FOL", "Completar el Examen de corrección", hoy_str + "06"),
-            ("Ofimática", "Corrección de Lección", hoy_str + "07"),
-            ("Historia", "Pasar materia y dibujar el mapa", hoy_str + "10"),
-            ("Matemática", "Materia y deber en la plataforma", hoy_str + "04"),
-            ("Lengua", "Realizar un marco con 5 compromisos", hoy_str + "12"),
-            ("Química", "Libro, cuaderno con caratula", hoy_str + "15"),
-            ("Física", "Deberes y materia", hoy_str + "18"),
-            ("Ed. Física", "Del libro página 51-63", hoy_str + "20"),
+            ("Biología", "Completar trabajo en clase y firmar documentos", hoy_str + "05", "Tarea"),
+            ("FOL", "Examen Parcial de Corrección", hoy_str + "06", "Examen"),
+            ("Ofimática", "Corrección de Lección", hoy_str + "07", "Tarea"),
+            ("Historia", "Pasar materia y dibujar el mapa", hoy_str + "10", "Tarea"),
+            ("Matemática", "Evaluación de la plataforma", hoy_str + "04", "Examen"),
+            ("Lengua", "Realizar un marco con 5 compromisos", hoy_str + "12", "Tarea"),
+            ("Química", "Lección escrita del libro", hoy_str + "15", "Examen"),
+            ("Física", "Deberes y materia", hoy_str + "18", "Tarea"),
+            ("Ed. Física", "Del libro página 51-63", hoy_str + "20", "Tarea"),
         ]
         cursor.executemany(
-            "INSERT INTO tasks (subject, title, due_date) VALUES (?, ?, ?)",
+            "INSERT INTO tasks (subject, title, due_date, item_type) VALUES (?, ?, ?, ?)",
             initial_tasks,
         )
 
@@ -81,7 +82,7 @@ def update_user_activity(email):
     conn.commit()
     conn.close()
 
-# Plantilla HTML Unificada, Depurada y con Nuevos Componentes Visuales
+# Plantilla HTML Unificada
 HTML_TEMPLATE = """
 <!DOCTYPE html>
 <html lang="es">
@@ -95,28 +96,15 @@ HTML_TEMPLATE = """
         body { font-family: 'Quicksand', sans-serif; background-color: #fdfbf7; color: #4a403b; overflow-x: hidden; }
         .school-card-admin { background: #ffffff; border: 2px solid #fdba74; box-shadow: 0 10px 25px -5px rgba(249, 115, 22, 0.15); }
         .calendar-desk {
-            background: #ffffff;
-            border: 4px solid #38bdf8;
-            border-radius: 2rem;
-            box-shadow: 0 20px 35px -10px rgba(56, 189, 248, 0.2);
-            position: relative;
-            overflow: hidden;
+            background: #ffffff; border: 4px solid #38bdf8; border-radius: 2rem; box-shadow: 0 20px 35px -10px rgba(56, 189, 248, 0.2); position: relative; overflow: hidden;
         }
         .calendar-header-bar {
-            background: linear-gradient(135deg, #fbbf24 0%, #f59e0b 100%);
-            border-bottom: 4px solid #38bdf8;
-            padding: 1.5rem;
+            background: linear-gradient(135deg, #fbbf24 0%, #f59e0b 100%); border-bottom: 4px solid #38bdf8; padding: 1.5rem;
         }
         .binder-ring {
-            width: 24px; height: 48px;
-            background: linear-gradient(90deg, #cbd5e1, #f8fafc, #94a3b8);
-            border: 3px solid #64748b; border-radius: 12px;
-            position: absolute; top: -30px;
-            box-shadow: 0 4px 6px rgba(0,0,0,0.15);
+            width: 24px; height: 48px; background: linear-gradient(90deg, #cbd5e1, #f8fafc, #94a3b8); border: 3px solid #64748b; border-radius: 12px; position: absolute; top: -30px; box-shadow: 0 4px 6px rgba(0,0,0,0.15);
         }
-        .puzzle-transition {
-            animation: puzzleEffect 0.7s cubic-bezier(0.25, 1, 0.5, 1) forwards;
-        }
+        .puzzle-transition { animation: puzzleEffect 0.7s cubic-bezier(0.25, 1, 0.5, 1) forwards; }
         @keyframes puzzleEffect {
             0% { transform: scale(1) rotate(0deg); opacity: 1; }
             50% { transform: scale(0.92) rotate(-2deg) translateY(-10px); opacity: 0.4; }
@@ -132,8 +120,7 @@ HTML_TEMPLATE = """
             50% { transform: translateY(-6px); }
         }
         .speech-bubble {
-            position: relative; background: #ffffff; border: 3px solid #fde047; border-radius: 1.5rem; padding: 1.25rem;
-            box-shadow: 0 10px 25px -5px rgba(251, 191, 36, 0.2);
+            position: relative; background: #ffffff; border: 3px solid #fde047; border-radius: 1.5rem; padding: 1.25rem; box-shadow: 0 10px 25px -5px rgba(251, 191, 36, 0.2);
         }
         .speech-bubble::after {
             content: ''; position: absolute; left: 30px; bottom: -15px; border-width: 15px 15px 0; border-style: solid; border-color: #fde047 transparent; display: block; width: 0;
@@ -175,7 +162,7 @@ HTML_TEMPLATE = """
                 <span class="text-6xl avatar-talking">👦🏽🗣️</span>
             </div>
             <h2 class="text-2xl font-bold text-amber-900 mb-2">¡Armando tu Calendario!</h2>
-            <p class="text-amber-700 font-semibold text-sm mb-6">Organizando materias, dibujos y tareas... 🧩✨</p>
+            <p class="text-amber-700 font-semibold text-sm mb-6">Organizando tareas, exámenes y materias... 🧩✨</p>
             <a href="/dismiss_transition" class="inline-block w-full bg-amber-500 hover:bg-amber-400 text-white font-bold py-3.5 px-6 rounded-2xl shadow-lg transition">
                 ¡Comenzar! 🚀
             </a>
@@ -238,7 +225,7 @@ HTML_TEMPLATE = """
         </div>
 
         {% elif session.role == 'ADMIN' %}
-        <!-- PANEL DE ADMINISTRADORES CON USUARIOS ACTIVOS EN TIEMPO REAL -->
+        <!-- PANEL DE ADMINISTRADORES -->
         <div class="space-y-6">
             <div class="flex items-center gap-4 bg-white p-6 rounded-3xl shadow-md border-2 border-orange-200">
                 <div class="w-20 h-20 bg-orange-100 rounded-full flex items-center justify-center border-4 border-orange-300 shadow-md flex-shrink-0">
@@ -246,7 +233,7 @@ HTML_TEMPLATE = """
                 </div>
                 <div class="speech-bubble !border-orange-300 flex-grow">
                     <h2 class="text-base font-bold text-orange-900 mb-1">¡Panel de Profesores y Administradores! 🦉✨</h2>
-                    <p class="text-xs text-orange-800">Gestiona las tareas y visualiza qué alumnos están activos ahora mismo en la plataforma.</p>
+                    <p class="text-xs text-orange-800">Gestiona tareas o exámenes, edita publicaciones y supervisa la actividad en tiempo real.</p>
                 </div>
             </div>
 
@@ -260,43 +247,69 @@ HTML_TEMPLATE = """
                         <span class="w-3 h-3 bg-emerald-500 rounded-full animate-pulse"></span>
                         <div class="overflow-hidden">
                             <p class="text-xs font-bold text-orange-900 truncate">{{ user[0] }}</p>
-                            <p class="text-[10px] text-orange-700">Última actividad: {{ user[1] }}</p>
+                            <p class="text-[10px] text-orange-700">Activo: {{ user[1] }}</p>
                         </div>
                     </div>
                     {% endfor %}
                 </div>
                 {% else %}
-                <p class="text-xs text-orange-800">No hay otros usuarios activos registrados recientemente.</p>
+                <p class="text-xs text-orange-800">No hay usuarios activos registrados recientemente.</p>
                 {% endif %}
             </div>
 
-            <!-- Formulario agregar tarea -->
+            <!-- FORMULARIO EDITAR O AGREGAR TAREA/EXAMEN -->
             <div class="school-card-admin p-6 rounded-3xl">
-                <h3 class="text-sm font-bold text-orange-900 mb-4">📌 Agregar Tarea al Calendario</h3>
-                <form action="/admin/add" method="POST" class="grid grid-cols-1 md:grid-cols-4 gap-4">
-                    <input type="text" name="subject" required placeholder="Materia (ej. Matemática)" class="bg-orange-50/40 border-2 border-orange-200 rounded-xl p-3 text-orange-900 text-sm font-medium">
-                    <input type="text" name="title" required placeholder="Descripción de la tarea" class="bg-orange-50/40 border-2 border-orange-200 rounded-xl p-3 text-orange-900 text-sm font-medium md:col-span-2">
-                    <input type="date" name="due_date" required class="bg-orange-50/40 border-2 border-orange-200 rounded-xl p-3 text-orange-900 text-sm font-medium">
-                    <button type="submit" class="md:col-span-4 bg-orange-500 hover:bg-orange-400 text-white font-bold py-3 rounded-xl transition text-sm shadow-md">Publicar Tarea ✏️</button>
+                <h3 class="text-sm font-bold text-orange-900 mb-4">
+                    {% if edit_task %}✏️ Editando: {{ edit_task[1] }} ({{ edit_task[4] }}){% else %}📌 Agregar Tarea o Examen al Calendario{% endif %}
+                </h3>
+                <form action="{% if edit_task %}/admin/edit/{{ edit_task[0] }}{% else %}/admin/add{% endif %}" method="POST" class="grid grid-cols-1 md:grid-cols-4 gap-4">
+                    <input type="text" name="subject" required value="{% if edit_task %}{{ edit_task[1] }}{% endif %}" placeholder="Materia (ej. Matemática)" class="bg-orange-50/40 border-2 border-orange-200 rounded-xl p-3 text-orange-900 text-sm font-medium">
+                    <input type="text" name="title" required value="{% if edit_task %}{{ edit_task[2] }}{% endif %}" placeholder="Descripción de la tarea o examen" class="bg-orange-50/40 border-2 border-orange-200 rounded-xl p-3 text-orange-900 text-sm font-medium md:col-span-2">
+                    <input type="date" name="due_date" required value="{% if edit_task %}{{ edit_task[3] }}{% endif %}" class="bg-orange-50/40 border-2 border-orange-200 rounded-xl p-3 text-orange-900 text-sm font-medium">
+                    
+                    <div class="md:col-span-2 flex items-center gap-4 bg-orange-50/30 p-3 rounded-xl border border-orange-200">
+                        <span class="text-xs font-bold text-orange-900">Tipo:</span>
+                        <label class="flex items-center gap-1 text-xs font-semibold text-orange-900 cursor-pointer">
+                            <input type="radio" name="item_type" value="Tarea" {% if not edit_task or edit_task[4] == 'Tarea' %}checked{% endif %} class="accent-orange-500"> 📚 Tarea
+                        </label>
+                        <label class="flex items-center gap-1 text-xs font-semibold text-rose-800 cursor-pointer">
+                            <input type="radio" name="item_type" value="Examen" {% if edit_task and edit_task[4] == 'Examen' %}checked{% endif %} class="accent-rose-500"> 📝 Examen
+                        </label>
+                    </div>
+
+                    <div class="md:col-span-2 flex gap-2">
+                        {% if edit_task %}
+                        <a href="/" class="w-1/3 bg-slate-300 hover:bg-slate-400 text-slate-800 font-bold py-3 rounded-xl transition text-sm text-center">Cancelar</a>
+                        <button type="submit" class="w-2/3 bg-amber-600 hover:bg-amber-500 text-white font-bold py-3 rounded-xl transition text-sm shadow-md">Guardar Cambios 💾</button>
+                        {% else %}
+                        <button type="submit" class="w-full bg-orange-500 hover:bg-orange-400 text-white font-bold py-3 rounded-xl transition text-sm shadow-md">Publicar en el Calendario ✏️</button>
+                        {% endif %}
+                    </div>
                 </form>
             </div>
 
-            <!-- Tabla tareas profesor -->
+            <!-- TABLA DE GESTIÓN PROFESOR -->
             <div class="school-card-admin p-6 rounded-3xl overflow-x-auto">
-                <h3 class="text-sm font-bold text-orange-900 mb-4">📋 Tareas Registradas</h3>
+                <h3 class="text-sm font-bold text-orange-900 mb-4">📋 Elementos Registrados (Tareas y Exámenes)</h3>
                 <table class="w-full text-left border-collapse">
                     <thead>
                         <tr class="border-b-2 border-orange-100 text-xs font-bold text-orange-800">
-                            <th class="p-3">Materia</th><th class="p-3">Descripción</th><th class="p-3">Fecha Límite</th><th class="p-3 text-center">Acción</th>
+                            <th class="p-3">Tipo</th><th class="p-3">Materia</th><th class="p-3">Descripción</th><th class="p-3">Fecha Límite</th><th class="p-3 text-center">Acciones</th>
                         </tr>
                     </thead>
                     <tbody class="divide-y divide-orange-100 text-sm">
                         {% for task in tasks %}
                         <tr>
+                            <td class="p-3">
+                                <span class="text-[10px] font-bold px-2.5 py-1 rounded-full {% if task[4] == 'Examen' %}bg-rose-100 text-rose-800 border border-rose-300{% else %}bg-sky-100 text-sky-800{% endif %}">
+                                    {{ task[4] }}
+                                </span>
+                            </td>
                             <td class="p-3 font-bold text-orange-900">{{ task[1] }}</td>
                             <td class="p-3 text-amber-900/80">{{ task[2] }}</td>
                             <td class="p-3 text-amber-700 text-xs font-semibold">📅 {{ task[3] }}</td>
-                            <td class="p-3 text-center">
+                            <td class="p-3 text-center flex justify-center gap-2">
+                                <a href="/admin/edit/{{ task[0] }}" class="text-amber-700 bg-amber-50 border border-amber-200 px-3 py-1.5 rounded-xl font-bold text-xs transition">Editar ✏️</a>
                                 <a href="/admin/delete/{{ task[0] }}" class="text-rose-600 bg-rose-50 border border-rose-200 px-3 py-1.5 rounded-xl font-bold text-xs transition">Borrar 🗑️</a>
                             </td>
                         </tr>
@@ -315,10 +328,51 @@ HTML_TEMPLATE = """
                     <span class="text-4xl avatar-talking">👦🏽🗣️</span>
                 </div>
                 <div class="speech-bubble flex-grow">
-                    <h2 class="text-base font-bold text-sky-900 mb-1">¡Selecciona un día y organiza tus materias! 🧩✨</h2>
-                    <p class="text-xs text-sky-800">Haz clic en el botón de verificación verde de cualquier tarea completada para enviarla directo al historial de terminadas.</p>
+                    <h2 class="text-base font-bold text-sky-900 mb-1">¡Selecciona un día y revisa tus pendientes y exámenes! 🧩✨</h2>
+                    <p class="text-xs text-sky-800">Haz clic en el botón verde de cualquier tarea o examen completado para enviarlo al historial.</p>
                 </div>
             </div>
+
+            <!-- APARTADO APARTE: EXÁMENES PRÓXIMOS -->
+            {% set exam_list = tasks | selectattr('item_type', 'equalto', 'Examen') | list %}
+            {% if exam_list %}
+            <div class="bg-gradient-to-r from-rose-50 to-orange-50 border-4 border-rose-300 rounded-3xl p-6 md:p-8 shadow-md">
+                <div class="flex items-center gap-3 mb-6">
+                    <span class="text-3xl">📝🚨</span>
+                    <div>
+                        <h3 class="text-base font-bold text-rose-900">Sección de Exámenes Próximos</h3>
+                        <p class="text-xs text-rose-700">Atención: Estos son tus próximos exámenes oficiales agendados por los profesores.</p>
+                    </div>
+                </div>
+
+                <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                    {% for exam in exam_list %}
+                    <div class="bg-white border-2 {% if exam.is_completed %}border-emerald-400 bg-emerald-50/30{% else %}border-rose-300{% endif %} rounded-2xl p-4 flex flex-col justify-between shadow-sm">
+                        <div>
+                            <div class="flex justify-between items-start mb-2">
+                                <span class="text-xs font-bold px-2.5 py-0.5 rounded-full bg-rose-100 text-rose-900 border border-rose-200">📝 Examen: {{ exam.subject }}</span>
+                            </div>
+                            <div class="mb-2 bg-rose-50/60 border border-rose-200 px-3 py-2 rounded-xl">
+                                <span class="text-[10px] font-bold text-rose-800 uppercase block">📅 Fecha de Examen:</span>
+                                <span class="text-sm font-black text-rose-950">{{ exam.due_date }} <span class="text-xs font-bold text-indigo-800">({{ exam.day_name }})</span></span>
+                            </div>
+                            <p class="text-slate-900 font-bold text-xs {% if exam.is_completed %}line-through text-slate-400 font-normal{% endif %} mb-3">
+                                {{ exam.title }}
+                            </p>
+                        </div>
+                        <div class="pt-2 border-t border-slate-100 flex justify-between items-center">
+                            <span class="text-[11px] font-bold {% if exam.is_completed %}text-emerald-700{% else %}text-rose-800{% endif %}">
+                                {% if exam.is_completed %}¡Repasado / Hecho! ✅{% else %}Pendiente de Estudio ⏳{% endif %}
+                            </span>
+                            <a href="/toggle/{{ exam.id }}{% if selected_day %}?day={{ selected_day }}{% endif %}" class="w-8 h-8 rounded-xl border-2 {% if exam.is_completed %}bg-emerald-500 border-emerald-600 text-white shadow-md{% else %}bg-white border-rose-300 hover:bg-rose-50 text-rose-600{% endif %} flex items-center justify-center font-bold text-sm transition" title="Marcar examen">
+                                {% if exam.is_completed %}✔{% else %}✓{% endif %}
+                            </a>
+                        </div>
+                    </div>
+                    {% endfor %}
+                </div>
+            </div>
+            {% endif %}
 
             <!-- BOTONES DE FILTRO POR DÍA -->
             <div class="bg-white p-4 md:p-6 rounded-3xl shadow-sm border-2 border-sky-200 flex flex-wrap justify-center items-center gap-3">
@@ -331,7 +385,7 @@ HTML_TEMPLATE = """
                 <button onclick="triggerPuzzleAnimation('/day/Viernes')" class="px-4 py-2 rounded-xl text-xs font-bold transition {% if selected_day == 'Viernes' %}bg-amber-500 text-white shadow-md scale-105{% else %}bg-amber-50 hover:bg-amber-100 text-amber-900{% endif %}">🧩 Viernes</button>
             </div>
 
-            <!-- CALENDARIO PRINCIPAL DE TAREAS -->
+            <!-- CALENDARIO PRINCIPAL DE TAREAS Y EXÁMENES -->
             <div id="calendar-desk-container" class="calendar-desk p-6 md:p-8">
                 <div class="absolute top-0 left-1/4 binder-ring"></div>
                 <div class="absolute top-0 left-1/2 binder-ring" style="transform: translateX(-50%);"></div>
@@ -339,23 +393,23 @@ HTML_TEMPLATE = """
 
                 <div class="calendar-header-bar rounded-2xl mb-6 flex justify-between items-center text-white shadow-inner">
                     <div>
-                        <h3 class="text-lg font-bold">{% if selected_day %}Día: {{ selected_day }}{% else %}Agenda de Tareas Semanales{% endif %}</h3>
-                        <p class="text-xs text-amber-100">Organiza tus asignaciones con fichas coloridas</p>
+                        <h3 class="text-lg font-bold">{% if selected_day %}Día: {{ selected_day }}{% else %}Agenda General de Actividades{% endif %}</h3>
+                        <p class="text-xs text-amber-100">Tareas y Evaluaciones ordenadas</p>
                     </div>
                 </div>
 
                 <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
                     {% for task in tasks %}
-                    <div class="bg-white border-2 {% if task.is_completed %}border-emerald-400 bg-emerald-50/30{% else %}border-sky-200{% endif %} rounded-2xl p-5 flex flex-col justify-between shadow-sm transition-all">
+                    <div class="bg-white border-2 {% if task.is_completed %}border-emerald-400 bg-emerald-50/30{% else %}{% if task.item_type == 'Examen' %}border-rose-300{% else %}border-sky-200{% endif %}{% endif %} rounded-2xl p-5 flex flex-col justify-between shadow-sm transition-all">
                         <div>
                             <div class="flex justify-between items-start mb-3">
-                                <span class="text-xs font-bold px-3 py-1 rounded-full {% if task.is_completed %}bg-emerald-200 text-emerald-900{% else %}bg-indigo-100 text-indigo-900{% endif %}">
-                                    📚 {{ task.subject }}
+                                <span class="text-xs font-bold px-3 py-1 rounded-full {% if task.item_type == 'Examen' %}bg-rose-100 text-rose-900{% else %}{% if task.is_completed %}bg-emerald-200 text-emerald-900{% else %}bg-indigo-100 text-indigo-900{% endif %}{% endif %}">
+                                    {% if task.item_type == 'Examen' %}📝 Examen: {% else %}📚 {% endif %}{{ task.subject }}
                                 </span>
                             </div>
                             <!-- FECHA -->
                             <div class="mb-3 bg-gradient-to-r from-amber-100 to-yellow-50 border-2 border-amber-300 px-3.5 py-2.5 rounded-xl">
-                                <span class="text-[11px] font-bold text-amber-800 uppercase block">📅 Fecha de Entrega:</span>
+                                <span class="text-[11px] font-bold text-amber-800 uppercase block">📅 Fecha Límite:</span>
                                 <span class="text-base font-black text-amber-950">{{ task.due_date }} <span class="text-xs font-bold text-indigo-800">({{ task.day_name }})</span></span>
                             </div>
                             <!-- DESCRIPCIÓN -->
@@ -379,7 +433,7 @@ HTML_TEMPLATE = """
                 </div>
             </div>
 
-            <!-- NUEVO APARTADO: CALENDARIO DE MATERIAS Y DÍAS (SOLO DIBUJOS Y MATERIAS, SIN DESCRIPCIÓN) -->
+            <!-- CALENDARIO VISUAL DE MATERIAS Y DÍAS (SOLO DIBUJOS Y MATERIAS) -->
             <div class="bg-white border-4 border-amber-300 rounded-3xl p-6 md:p-8 shadow-md">
                 <div class="flex items-center gap-3 mb-6">
                     <span class="text-3xl">🎨🗓️</span>
@@ -401,7 +455,7 @@ HTML_TEMPLATE = """
                         <p class="text-xs font-semibold text-slate-700 mt-2">FOL & Ofimática</p>
                     </div>
                     <div class="bg-emerald-50 border-2 border-emerald-200 p-4 rounded-2xl shadow-sm hover:scale-105 transition">
-                        <span class="text-3xl block mb-2">📜🗺️️</span>
+                        <span class="text-3xl block mb-2">📜🗺</span>
                         <h4 class="font-bold text-emerald-900 text-xs uppercase">Miércoles</h4>
                         <p class="text-xs font-semibold text-slate-700 mt-2">Historia & Lengua</p>
                     </div>
@@ -422,7 +476,7 @@ HTML_TEMPLATE = """
             <div id="section-completed" class="bg-emerald-50/90 border-2 border-emerald-300 rounded-3xl p-6 shadow-sm">
                 <div class="flex items-center gap-2 mb-4">
                     <span class="text-2xl">🏆</span>
-                    <h3 class="text-base font-bold text-emerald-900">Historial de Materias Terminadas</h3>
+                    <h3 class="text-base font-bold text-emerald-900">Historial de Materias y Exámenes Terminados</h3>
                 </div>
 
                 {% set completed_tasks = all_tasks | selectattr('is_completed') | list %}
@@ -431,7 +485,7 @@ HTML_TEMPLATE = """
                     {% for task in completed_tasks %}
                     <div class="bg-white border-2 border-emerald-300 p-4 rounded-2xl flex justify-between items-center shadow-sm">
                         <div>
-                            <span class="text-xs font-bold text-emerald-800 bg-emerald-100 px-2.5 py-0.5 rounded-full">📚 {{ task.subject }}</span>
+                            <span class="text-xs font-bold text-emerald-800 bg-emerald-100 px-2.5 py-0.5 rounded-full">{{ task.item_type }}: {{ task.subject }}</span>
                             <p class="text-amber-800 font-extrabold text-xs mt-1">📅 {{ task.due_date }}</p>
                             <p class="text-slate-400 font-medium text-xs line-through mt-0.5">{{ task.title }}</p>
                         </div>
@@ -442,7 +496,7 @@ HTML_TEMPLATE = """
                     {% endfor %}
                 </div>
                 {% else %}
-                <p class="text-xs text-emerald-800 bg-white/60 p-4 rounded-2xl font-medium">📌 Haz clic en el botón verde de tus tareas para marcarlas como terminadas y verlas aquí.</p>
+                <p class="text-xs text-emerald-800 bg-white/60 p-4 rounded-2xl font-medium">📌 Haz clic en el botón verde de tus tareas o exámenes para marcarlos como terminados y verlos aquí.</p>
                 {% endif %}
             </div>
         </div>
@@ -461,7 +515,7 @@ DIAS_SEMANA = {0: "Lunes", 1: "Martes", 2: "Miércoles", 3: "Jueves", 4: "Vierne
 def process_tasks_with_days(rows):
     tasks = []
     for r in rows:
-        task_id, subject, title, due_date_str, status = r[0], r[1], r[2], r[3], r[4]
+        task_id, subject, title, due_date_str, item_type, status = r[0], r[1], r[2], r[3], r[4], r[5]
         is_completed = (status == "COMPLETADO")
         day_name = "Desconocido"
         try:
@@ -472,6 +526,7 @@ def process_tasks_with_days(rows):
         tasks.append({
             "id": task_id, "subject": subject, "title": title,
             "due_date": due_date_str, "day_name": day_name,
+            "item_type": item_type if item_type else "Tarea",
             "status": status, "is_completed": is_completed
         })
     tasks.sort(key=lambda x: x["due_date"])
@@ -487,18 +542,17 @@ def index():
     conn = sqlite3.connect("database.db")
     cursor = conn.cursor()
 
-    if session["role"] == "ADMIN":
-        cursor.execute("SELECT id, subject, title, due_date FROM tasks ORDER BY due_date ASC")
+    if session.get("role") == "ADMIN":
+        cursor.execute("SELECT id, subject, title, due_date, item_type FROM tasks ORDER BY due_date ASC")
         tasks = cursor.fetchall()
         
-        # Obtener usuarios activos recientes (últimos 15 minutos o listado general)
         cursor.execute("SELECT email, last_active FROM active_users ORDER BY last_active DESC")
         active_users = cursor.fetchall()
         conn.close()
-        return render_template_string(HTML_TEMPLATE, tasks=tasks, active_users=active_users)
+        return render_template_string(HTML_TEMPLATE, tasks=tasks, active_users=active_users, edit_task=None)
     else:
         cursor.execute("""
-            SELECT T1.id, T1.subject, T1.title, T1.due_date, 
+            SELECT T1.id, T1.subject, T1.title, T1.due_date, T1.item_type,
             COALESCE(P.status, 'PENDIENTE') as status
             FROM tasks T1
             LEFT JOIN progress P ON T1.id = P.task_id AND P.email = ?
@@ -519,7 +573,7 @@ def filter_by_day(day_name):
     conn = sqlite3.connect("database.db")
     cursor = conn.cursor()
     cursor.execute("""
-        SELECT T1.id, T1.subject, T1.title, T1.due_date, 
+        SELECT T1.id, T1.subject, T1.title, T1.due_date, T1.item_type,
         COALESCE(P.status, 'PENDIENTE') as status
         FROM tasks T1
         LEFT JOIN progress P ON T1.id = P.task_id AND P.email = ?
@@ -564,14 +618,47 @@ def admin_add():
     subject = request.form.get("subject")
     title = request.form.get("title")
     due_date = request.form.get("due_date")
+    item_type = request.form.get("item_type", "Tarea")
 
     conn = sqlite3.connect("database.db")
     cursor = conn.cursor()
-    cursor.execute("INSERT INTO tasks (subject, title, due_date) VALUES (?, ?, ?)", (subject, title, due_date))
+    cursor.execute("INSERT INTO tasks (subject, title, due_date, item_type) VALUES (?, ?, ?, ?)", (subject, title, due_date, item_type))
     conn.commit()
     conn.close()
-    flash("¡Nueva tarea agregada al calendario!")
+    flash("¡Nuevo elemento agregado al calendario!")
     return redirect(url_for("index"))
+
+@app.route("/admin/edit/<int:task_id>", methods=["GET", "POST"])
+def admin_edit(task_id):
+    if session.get("role") != "ADMIN":
+        return redirect(url_for("index"))
+
+    conn = sqlite3.connect("database.db")
+    cursor = conn.cursor()
+
+    if request.method == "POST":
+        subject = request.form.get("subject")
+        title = request.form.get("title")
+        due_date = request.form.get("due_date")
+        item_type = request.form.get("item_type", "Tarea")
+
+        cursor.execute("UPDATE tasks SET subject = ?, title = ?, due_date = ?, item_type = ? WHERE id = ?", (subject, title, due_date, item_type, task_id))
+        conn.commit()
+        conn.close()
+        flash("Elemento actualizado correctamente.")
+        return redirect(url_for("index"))
+
+    # Si es GET, cargamos el elemento para editarlo en el formulario
+    cursor.execute("SELECT id, subject, title, due_date, item_type FROM tasks WHERE id = ?", (task_id,))
+    edit_task = cursor.fetchone()
+
+    cursor.execute("SELECT id, subject, title, due_date, item_type FROM tasks ORDER BY due_date ASC")
+    tasks = cursor.fetchall()
+    cursor.execute("SELECT email, last_active FROM active_users ORDER BY last_active DESC")
+    active_users = cursor.fetchall()
+    conn.close()
+
+    return render_template_string(HTML_TEMPLATE, tasks=tasks, active_users=active_users, edit_task=edit_task)
 
 @app.route("/admin/delete/<int:task_id>")
 def admin_delete(task_id):
@@ -583,7 +670,7 @@ def admin_delete(task_id):
     cursor.execute("DELETE FROM progress WHERE task_id = ?", (task_id,))
     conn.commit()
     conn.close()
-    flash("Tarea eliminada correctamente.")
+    flash("Elemento eliminado correctamente.")
     return redirect(url_for("index"))
 
 @app.route("/toggle/<int:task_id>")
@@ -593,7 +680,7 @@ def toggle_progress(task_id):
         return redirect(url_for("index"))
 
     update_user_activity(user)
-    day_filter = request.args.get("day")
+    day_filter = request.args.get("day")    
 
     conn = sqlite3.connect("database.db")
     cursor = conn.cursor()
@@ -602,15 +689,15 @@ def toggle_progress(task_id):
 
     if row is None:
         cursor.execute("INSERT INTO progress (email, task_id, status) VALUES (?, ?, ?)", (user, task_id, "COMPLETADO"))
-        flash("¡Tarea completada y movida al historial! 🏆")
+        flash("¡Completado y movido al historial! 🏆")
     else:
         current_status = row[0]
         new_status = "PENDIENTE" if current_status == "COMPLETADO" else "COMPLETADO"
         cursor.execute("UPDATE progress SET status = ? WHERE email = ? AND task_id = ?", (new_status, user, task_id))
         if new_status == "COMPLETADO":
-            flash("¡Tarea marcada como completada! 🎉")
+            flash("¡Marcado como completado! 🎉")
         else:
-            flash("Tarea devuelta a pendientes ↩️")
+            flash("Devuelto a pendientes ↩️")
 
     conn.commit()
     conn.close()
@@ -620,6 +707,5 @@ def toggle_progress(task_id):
     return redirect(url_for("index"))
 
 if __name__ == "__main__":
-    import os
-    port = int(os.environ.get("PORT", 5000))
-    app.run(host="0.0.0.0", port=port)
+    init_db()
+    app.run(debug=True, port=5000)
