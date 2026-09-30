@@ -40,6 +40,12 @@ def init_db():
         task_id_pk = "INTEGER PRIMARY KEY AUTOINCREMENT"
         progress_id_pk = "INTEGER PRIMARY KEY AUTOINCREMENT"
 
+    # --- LÍNEA TEMPORAL PARA RECREAR LA TABLA CON ON DELETE CASCADE EN RENDER ---
+    if is_postgres:
+        cursor.execute("DROP TABLE IF EXISTS progress CASCADE;")
+        conn.commit()
+    # ---------------------------------------------------------------------------
+
     # Tabla de Tareas y Exámenes
     cursor.execute(f"""
         CREATE TABLE IF NOT EXISTS tasks (
@@ -51,14 +57,14 @@ def init_db():
         )
     """)
 
-    # Tabla de Progreso de Estudiantes
+    # Tabla de Progreso de Estudiantes (con ON DELETE CASCADE integrado)
     cursor.execute(f"""
         CREATE TABLE IF NOT EXISTS progress (
             id {progress_id_pk},
             email TEXT NOT NULL,
             task_id INTEGER,
             status TEXT DEFAULT 'PENDIENTE',
-            FOREIGN KEY(task_id) REFERENCES tasks(id)
+            FOREIGN KEY(task_id) REFERENCES tasks(id) ON DELETE CASCADE
         )
     """)
 
@@ -69,7 +75,11 @@ def init_db():
             last_active TEXT
         )
     """)
-
+    
+    conn.commit()
+    cursor.close()
+    conn.close()
+    
     # Insertar elementos iniciales si la tabla está vacía
     cursor.execute("SELECT COUNT(*) FROM tasks")
     count = cursor.fetchone()[0]
