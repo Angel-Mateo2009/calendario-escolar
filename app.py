@@ -434,43 +434,53 @@ HTML_TEMPLATE = """
                 </div>
             </div>
 
-            <!-- CALENDARIO VISUAL DE MATERIAS Y DÍAS (SOLO DIBUJOS Y MATERIAS) -->
-            <div class="bg-white border-4 border-amber-300 rounded-3xl p-6 md:p-8 shadow-md">
-                <div class="flex items-center gap-3 mb-6">
-                    <span class="text-3xl">🎨🗓️</span>
-                    <div>
-                        <h3 class="text-base font-bold text-amber-900">Calendario Visual de Materias por Día</h3>
-                        <p class="text-xs text-amber-700">Guía rápida de tus materias diarias con ilustraciones y sin textos largos.</p>
-                    </div>
-                </div>
+            <!-- CALENDARIO VISUAL DE MATERIAS Y DÍAS (DINÁMICO) -->
+<div class="bg-white border-4 border-amber-300 rounded-3xl p-6 md:p-8 shadow-md">
+    <div class="flex items-center gap-3 mb-6">
+        <span class="text-3xl">🎨 📅</span>
+        <div>
+            <h3 class="text-base font-bold text-amber-900">Calendario Visual de Materias por Día</h3>
+            <p class="text-xs text-amber-700">Guía rápida de tus materias diarias con ilustraciones y sin textos largos.</p>
+        </div>
+    </div>
 
-                <div class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-4 text-center">
-                    <div class="bg-amber-50 border-2 border-amber-200 p-4 rounded-2xl shadow-sm hover:scale-105 transition">
-                        <span class="text-3xl block mb-2">🎒📘</span>
-                        <h4 class="font-bold text-amber-900 text-xs uppercase">Lunes</h4>
-                        <p class="text-xs font-semibold text-slate-700 mt-2">Biología & Matemática</p>
-                    </div>
-                    <div class="bg-sky-50 border-2 border-sky-200 p-4 rounded-2xl shadow-sm hover:scale-105 transition">
-                        <span class="text-3xl block mb-2">💻✏️</span>
-                        <h4 class="font-bold text-sky-900 text-xs uppercase">Martes</h4>
-                        <p class="text-xs font-semibold text-slate-700 mt-2">FOL & Ofimática</p>
-                    </div>
-                    <div class="bg-emerald-50 border-2 border-emerald-200 p-4 rounded-2xl shadow-sm hover:scale-105 transition">
-                        <span class="text-3xl block mb-2">📜🗺</span>
-                        <h4 class="font-bold text-emerald-900 text-xs uppercase">Miércoles</h4>
-                        <p class="text-xs font-semibold text-slate-700 mt-2">Historia & Lengua</p>
-                    </div>
-                    <div class="bg-purple-50 border-2 border-purple-200 p-4 rounded-2xl shadow-sm hover:scale-105 transition">
-                        <span class="text-3xl block mb-2">🧪🔬</span>
-                        <h4 class="font-bold text-purple-900 text-xs uppercase">Jueves</h4>
-                        <p class="text-xs font-semibold text-slate-700 mt-2">Química & Física</p>
-                    </div>
-                    <div class="bg-rose-50 border-2 border-rose-200 p-4 rounded-2xl shadow-sm hover:scale-105 transition col-span-2 sm:col-span-1">
-                        <span class="text-3xl block mb-2">🏀🏆</span>
-                        <h4 class="font-bold text-rose-900 text-xs uppercase">Viernes</h4>
-                        <p class="text-xs font-semibold text-slate-700 mt-2">Educación Física</p>
-                    </div>
-                </div>
+    <div class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-4 text-center">
+        <!-- LUNES -->
+        <a href="/day/Lunes" class="bg-amber-50 border-2 border-amber-200 p-4 rounded-2xl shadow-sm hover:scale-105 transition block">
+            <span class="text-3xl block mb-2">🎒 📘</span>
+            <h4 class="font-bold text-amber-900 text-xs uppercase">Lunes</h4>
+            <p class="text-xs font-semibold text-slate-700 mt-2">{{ calendar_subjects.get('LUNES', 'Sin actividades') }}</p>
+        </a>
+
+        <!-- MARTES -->
+        <a href="/day/Martes" class="bg-sky-50 border-2 border-sky-200 p-4 rounded-2xl shadow-sm hover:scale-105 transition block">
+            <span class="text-3xl block mb-2">💻 ✏️</span>
+            <h4 class="font-bold text-sky-900 text-xs uppercase">Martes</h4>
+            <p class="text-xs font-semibold text-slate-700 mt-2">{{ calendar_subjects.get('MARTES', 'Sin actividades') }}</p>
+        </a>
+
+        <!-- MIÉRCOLES -->
+        <a href="/day/Miercoles" class="bg-emerald-50 border-2 border-emerald-200 p-4 rounded-2xl shadow-sm hover:scale-105 transition block">
+            <span class="text-3xl block mb-2">📜 🗺️</span>
+            <h4 class="font-bold text-emerald-900 text-xs uppercase">Miércoles</h4>
+            <p class="text-xs font-semibold text-slate-700 mt-2">{{ calendar_subjects.get('MIÉRCOLES', 'Sin actividades') }}</p>
+        </a>
+
+        <!-- JUEVES -->
+        <a href="/day/Jueves" class="bg-purple-50 border-2 border-purple-200 p-4 rounded-2xl shadow-sm hover:scale-105 transition block">
+            <span class="text-3xl block mb-2">🧪 🔬</span>
+            <h4 class="font-bold text-purple-900 text-xs uppercase">Jueves</h4>
+            <p class="text-xs font-semibold text-slate-700 mt-2">{{ calendar_subjects.get('JUEVES', 'Sin actividades') }}</p>
+        </a>
+
+        <!-- VIERNES -->
+        <a href="/day/Viernes" class="bg-rose-50 border-2 border-rose-200 p-4 rounded-2xl shadow-sm hover:scale-105 transition col-span-2 sm:col-span-1 block">
+            <span class="text-3xl block mb-2">🏀 🏆</span>
+            <h4 class="font-bold text-rose-900 text-xs uppercase">Viernes</h4>
+            <p class="text-xs font-semibold text-slate-700 mt-2">{{ calendar_subjects.get('VIERNES', 'Sin actividades') }}</p>
+        </a>
+    </div>
+</div>
             </div>
 
             <!-- SECCIÓN HISTORIAL DE TAREAS COMPLETADAS -->
@@ -557,12 +567,28 @@ def index():
             COALESCE(P.status, 'PENDIENTE') as status
             FROM tasks T1
             LEFT JOIN progress P ON T1.id = P.task_id AND P.email = ?
+            ORDER BY T1.due_date ASC
         """, (user,))
         rows = cursor.fetchall()
         conn.close()
         
         tasks = process_tasks_with_days(rows)
-        return render_template_string(HTML_TEMPLATE, tasks=tasks, all_tasks=tasks, selected_day=None)
+        
+        # Agrupamos o filtramos las materias/tareas por día dinámicamente para el calendario visual
+        # Esto extrae las materias únicas asociadas a cada día de la agenda general
+        dias_semana = {"LUNES": set(), "MARTES": set(), "MIÉRCOLES": set(), "JUEVES": set(), "VIERNES": set()}
+        for t in tasks:
+            d_name = t.get("day_name", "").upper()
+            if d_name in dias_semana and t.get("subject"):
+                dias_semana[d_name].add(t["subject"])
+                
+        # Convertimos los sets a strings formateados (ej. "Biología & Matemática")
+        calendar_subjects = {
+            day: " & ".join(list(subjects)[:2]) if subjects else "Sin actividades"
+            for day, subjects in dias_semana.items()
+        }
+
+        return render_template_string(HTML_TEMPLATE, tasks=tasks, all_tasks=tasks, selected_day=None, calendar_subjects=calendar_subjects)
 
 @app.route("/day/<string:day_name>")
 def filter_by_day(day_name):
@@ -578,13 +604,27 @@ def filter_by_day(day_name):
         COALESCE(P.status, 'PENDIENTE') as status
         FROM tasks T1
         LEFT JOIN progress P ON T1.id = P.task_id AND P.email = ?
+        ORDER BY T1.due_date ASC
     """, (user,))
     rows = cursor.fetchall()
     conn.close()
     
     all_tasks = process_tasks_with_days(rows)
     filtered_tasks = [t for t in all_tasks if t["day_name"].lower() == day_name.lower()]
-    return render_template_string(HTML_TEMPLATE, tasks=filtered_tasks, all_tasks=all_tasks, selected_day=day_name)
+    
+    # Recalculamos los subjects para mantener la vista general del calendario sincronizada
+    dias_semana = {"LUNES": set(), "MARTES": set(), "MIÉRCOLES": set(), "JUEVES": set(), "VIERNES": set()}
+    for t in all_tasks:
+        d_name = t.get("day_name", "").upper()
+        if d_name in dias_semana and t.get("subject"):
+            dias_semana[d_name].add(t["subject"])
+            
+    calendar_subjects = {
+        day: " & ".join(list(subjects)[:2]) if subjects else "Sin actividades"
+        for day, subjects in dias_semana.items()
+    }
+
+    return render_template_string(HTML_TEMPLATE, tasks=filtered_tasks, all_tasks=all_tasks, selected_day=day_name, calendar_subjects=calendar_subjects)
 
 @app.route("/login", methods=["POST"])
 def login():
@@ -649,7 +689,6 @@ def admin_edit(task_id):
         flash("Elemento actualizado correctamente.")
         return redirect(url_for("index"))
 
-    # Si es GET, cargamos el elemento para editarlo en el formulario
     cursor.execute("SELECT id, subject, title, due_date, item_type FROM tasks WHERE id = ?", (task_id,))
     edit_task = cursor.fetchone()
 
@@ -706,7 +745,6 @@ def toggle_progress(task_id):
     if day_filter:
         return redirect(url_for("filter_by_day", day_name=day_filter))
     return redirect(url_for("index"))
-
 if __name__ == "__main__":
     init_db()  # Esto asegura que se cree la base de datos si no existe
     port = int(os.environ.get("PORT", 5000))
