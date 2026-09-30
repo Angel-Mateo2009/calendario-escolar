@@ -41,9 +41,9 @@ def init_db():
         progress_id_pk = "INTEGER PRIMARY KEY AUTOINCREMENT"
 
     # --- LÍNEA TEMPORAL PARA RECREAR LA TABLA CON ON DELETE CASCADE EN RENDER ---
-    if is_postgres:
-        cursor.execute("DROP TABLE IF EXISTS progress CASCADE;")
-        conn.commit()
+    #if is_postgres:
+        #cursor.execute("DROP TABLE IF EXISTS progress CASCADE;")
+        #conn.commit()
     # ---------------------------------------------------------------------------
 
     # Tabla de Tareas y Exámenes
