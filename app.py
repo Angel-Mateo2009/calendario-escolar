@@ -1,10 +1,10 @@
 import os
-from datetime import datetime, timedelta
-import sqlite3
-from flask import Flask, flash, redirect, render_template_string, request, session, url_for
+import psycopg2
+from datetime import datetime
+from flask import Flask, render_template_string, request, redirect, url_for, session, flash
 
 app = Flask(__name__)
-app.secret_key = "clave_escolar_super_segura_2026_ex"
+app.secret_key = "tu_clave_secreta_aqui"  # Mantén tu clave secreta
 
 # Lista oficial de Administradores
 ADMIN_EMAILS = [
@@ -13,14 +13,37 @@ ADMIN_EMAILS = [
     "angel.mateochamba2011@gmail.com"
 ]
 
+# Función centralizada para conectar a PostgreSQL (en Render) o SQLite (en local si estás probando en tu PC)
+def get_db_connection():
+    database_url = os.environ.get("DATABASE_URL")
+    if database_url:
+        if database_url.startswith("postgres://"):
+            database_url = database_url.replace("postgres://", "postgresql://", 1)
+        return psycopg2.connect(database_url)
+    else:
+        import sqlite3
+        conn = sqlite3.connect("database.db")
+        conn.row_factory = sqlite3.Row
+        return conn
+
 def init_db():
-    conn = sqlite3.connect("database.db")
+    conn = get_db_connection()
     cursor = conn.cursor()
 
-    # Tabla de Tareas y Exámenes (añadido el campo 'type')
-    cursor.execute("""
+    # Detectar si estamos usando PostgreSQL o SQLite para definir el autoincremento correcto
+    is_postgres = bool(os.environ.get("DATABASE_URL"))
+
+    if is_postgres:
+        task_id_pk = "SERIAL PRIMARY KEY"
+        progress_id_pk = "SERIAL PRIMARY KEY"
+    else:
+        task_id_pk = "INTEGER PRIMARY KEY AUTOINCREMENT"
+        progress_id_pk = "INTEGER PRIMARY KEY AUTOINCREMENT"
+
+    # Tabla de Tareas y Exámenes
+    cursor.execute(f"""
         CREATE TABLE IF NOT EXISTS tasks (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            id {task_id_pk},
             subject TEXT NOT NULL,
             title TEXT NOT NULL,
             due_date TEXT,
@@ -29,9 +52,9 @@ def init_db():
     """)
 
     # Tabla de Progreso de Estudiantes
-    cursor.execute("""
+    cursor.execute(f"""
         CREATE TABLE IF NOT EXISTS progress (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            id {progress_id_pk},
             email TEXT NOT NULL,
             task_id INTEGER,
             status TEXT DEFAULT 'PENDIENTE',
@@ -49,7 +72,8 @@ def init_db():
 
     # Insertar elementos iniciales si la tabla está vacía
     cursor.execute("SELECT COUNT(*) FROM tasks")
-    if cursor.fetchone()[0] == 0:
+    count = cursor.fetchone()[0]
+    if count == 0:
         hoy_str = datetime.now().strftime("%Y-%m-")
         initial_tasks = [
             ("Biología", "Completar trabajo en clase y firmar documentos", hoy_str + "05", "Tarea"),
@@ -62,28 +86,43 @@ def init_db():
             ("Física", "Deberes y materia", hoy_str + "18", "Tarea"),
             ("Ed. Física", "Del libro página 51-63", hoy_str + "20", "Tarea"),
         ]
+        
+        # Sintaxis adaptada para inserción masiva segura (psycopg2 usa %s, sqlite3 usa ?)
+        placeholder = "%s" if is_postgres else "?"
         cursor.executemany(
-            "INSERT INTO tasks (subject, title, due_date, item_type) VALUES (?, ?, ?, ?)",
+            f"INSERT INTO tasks (subject, title, due_date, item_type) VALUES ({placeholder}, {placeholder}, {placeholder}, {placeholder})",
             initial_tasks,
         )
 
     conn.commit()
+    cursor.close()
     conn.close()
+    print("Base de datos inicializada correctamente.")
 
 def update_user_activity(email):
     if not email:
         return
-    conn = sqlite3.connect("database.db")
+    conn = get_db_connection()
     cursor = conn.cursor()
+    is_postgres = bool(os.environ.get("DATABASE_URL"))
     now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    cursor.execute("""
-        INSERT INTO active_users (email, last_active) VALUES (?, ?)
-        ON CONFLICT(email) DO UPDATE SET last_active = ?
-    """, (email, now_str, now_str))
+
+    if is_postgres:
+        cursor.execute("""
+            INSERT INTO active_users (email, last_active) VALUES (%s, %s)
+            ON CONFLICT (email) DO UPDATE SET last_active = EXCLUDED.last_active
+        """, (email, now_str))
+    else:
+        cursor.execute("""
+            INSERT INTO active_users (email, last_active) VALUES (?, ?)
+            ON CONFLICT(email) DO UPDATE SET last_active = ?
+        """, (email, now_str, now_str))
+
     conn.commit()
+    cursor.close()
     conn.close()
 
-# Plantilla HTML Unificada
+# Plantilla HTML Unificada (aquí mantienes tu HTML tal cual lo tienes)
 HTML_TEMPLATE = """
 <!DOCTYPE html>
 <html lang="es">
@@ -550,7 +589,7 @@ def index():
         return render_template_string(HTML_TEMPLATE)
 
     update_user_activity(user)
-    conn = sqlite3.connect("database.db")
+    conn = get_db_connection()
     cursor = conn.cursor()
 
     if session.get("role") == "ADMIN":
@@ -559,30 +598,32 @@ def index():
         
         cursor.execute("SELECT email, last_active FROM active_users ORDER BY last_active DESC")
         active_users = cursor.fetchall()
+        cursor.close()
         conn.close()
         return render_template_string(HTML_TEMPLATE, tasks=tasks, active_users=active_users, edit_task=None)
     else:
-        cursor.execute("""
+        is_postgres = bool(os.environ.get("DATABASE_URL"))
+        ph = "%s" if is_postgres else "?"
+        
+        cursor.execute(f"""
             SELECT T1.id, T1.subject, T1.title, T1.due_date, T1.item_type,
             COALESCE(P.status, 'PENDIENTE') as status
             FROM tasks T1
-            LEFT JOIN progress P ON T1.id = P.task_id AND P.email = ?
+            LEFT JOIN progress P ON T1.id = P.task_id AND P.email = {ph}
             ORDER BY T1.due_date ASC
         """, (user,))
         rows = cursor.fetchall()
+        cursor.close()
         conn.close()
         
         tasks = process_tasks_with_days(rows)
         
-        # Agrupamos o filtramos las materias/tareas por día dinámicamente para el calendario visual
-        # Esto extrae las materias únicas asociadas a cada día de la agenda general
         dias_semana = {"LUNES": set(), "MARTES": set(), "MIÉRCOLES": set(), "JUEVES": set(), "VIERNES": set()}
         for t in tasks:
             d_name = t.get("day_name", "").upper()
             if d_name in dias_semana and t.get("subject"):
                 dias_semana[d_name].add(t["subject"])
                 
-        # Convertimos los sets a strings formateados (ej. "Biología & Matemática")
         calendar_subjects = {
             day: " & ".join(list(subjects)[:2]) if subjects else "Sin actividades"
             for day, subjects in dias_semana.items()
@@ -597,22 +638,26 @@ def filter_by_day(day_name):
         return redirect(url_for("index"))
 
     update_user_activity(user)
-    conn = sqlite3.connect("database.db")
+    conn = get_db_connection()
     cursor = conn.cursor()
-    cursor.execute("""
+    
+    is_postgres = bool(os.environ.get("DATABASE_URL"))
+    ph = "%s" if is_postgres else "?"
+
+    cursor.execute(f"""
         SELECT T1.id, T1.subject, T1.title, T1.due_date, T1.item_type,
         COALESCE(P.status, 'PENDIENTE') as status
         FROM tasks T1
-        LEFT JOIN progress P ON T1.id = P.task_id AND P.email = ?
+        LEFT JOIN progress P ON T1.id = P.task_id AND P.email = {ph}
         ORDER BY T1.due_date ASC
     """, (user,))
     rows = cursor.fetchall()
+    cursor.close()
     conn.close()
     
     all_tasks = process_tasks_with_days(rows)
     filtered_tasks = [t for t in all_tasks if t["day_name"].lower() == day_name.lower()]
     
-    # Recalculamos los subjects para mantener la vista general del calendario sincronizada
     dias_semana = {"LUNES": set(), "MARTES": set(), "MIÉRCOLES": set(), "JUEVES": set(), "VIERNES": set()}
     for t in all_tasks:
         d_name = t.get("day_name", "").upper()
@@ -661,10 +706,14 @@ def admin_add():
     due_date = request.form.get("due_date")
     item_type = request.form.get("item_type", "Tarea")
 
-    conn = sqlite3.connect("database.db")
+    conn = get_db_connection()
     cursor = conn.cursor()
-    cursor.execute("INSERT INTO tasks (subject, title, due_date, item_type) VALUES (?, ?, ?, ?)", (subject, title, due_date, item_type))
+    is_postgres = bool(os.environ.get("DATABASE_URL"))
+    ph = "%s" if is_postgres else "?"
+
+    cursor.execute(f"INSERT INTO tasks (subject, title, due_date, item_type) VALUES ({ph}, {ph}, {ph}, {ph})", (subject, title, due_date, item_type))
     conn.commit()
+    cursor.close()
     conn.close()
     flash("¡Nuevo elemento agregado al calendario!")
     return redirect(url_for("index"))
@@ -674,8 +723,10 @@ def admin_edit(task_id):
     if session.get("role") != "ADMIN":
         return redirect(url_for("index"))
 
-    conn = sqlite3.connect("database.db")
+    conn = get_db_connection()
     cursor = conn.cursor()
+    is_postgres = bool(os.environ.get("DATABASE_URL"))
+    ph = "%s" if is_postgres else "?"
 
     if request.method == "POST":
         subject = request.form.get("subject")
@@ -683,19 +734,21 @@ def admin_edit(task_id):
         due_date = request.form.get("due_date")
         item_type = request.form.get("item_type", "Tarea")
 
-        cursor.execute("UPDATE tasks SET subject = ?, title = ?, due_date = ?, item_type = ? WHERE id = ?", (subject, title, due_date, item_type, task_id))
+        cursor.execute(f"UPDATE tasks SET subject = {ph}, title = {ph}, due_date = {ph}, item_type = {ph} WHERE id = {ph}", (subject, title, due_date, item_type, task_id))
         conn.commit()
+        cursor.close()
         conn.close()
         flash("Elemento actualizado correctamente.")
         return redirect(url_for("index"))
 
-    cursor.execute("SELECT id, subject, title, due_date, item_type FROM tasks WHERE id = ?", (task_id,))
+    cursor.execute(f"SELECT id, subject, title, due_date, item_type FROM tasks WHERE id = {ph}", (task_id,))
     edit_task = cursor.fetchone()
 
     cursor.execute("SELECT id, subject, title, due_date, item_type FROM tasks ORDER BY due_date ASC")
     tasks = cursor.fetchall()
     cursor.execute("SELECT email, last_active FROM active_users ORDER BY last_active DESC")
     active_users = cursor.fetchall()
+    cursor.close()
     conn.close()
 
     return render_template_string(HTML_TEMPLATE, tasks=tasks, active_users=active_users, edit_task=edit_task)
@@ -704,11 +757,16 @@ def admin_edit(task_id):
 def admin_delete(task_id):
     if session.get("role") != "ADMIN":
         return redirect(url_for("index"))
-    conn = sqlite3.connect("database.db")
+    
+    conn = get_db_connection()
     cursor = conn.cursor()
-    cursor.execute("DELETE FROM tasks WHERE id = ?", (task_id,))
-    cursor.execute("DELETE FROM progress WHERE task_id = ?", (task_id,))
+    is_postgres = bool(os.environ.get("DATABASE_URL"))
+    ph = "%s" if is_postgres else "?"
+
+    cursor.execute(f"DELETE FROM tasks WHERE id = {ph}", (task_id,))
+    cursor.execute(f"DELETE FROM progress WHERE task_id = {ph}", (task_id,))
     conn.commit()
+    cursor.close()
     conn.close()
     flash("Elemento eliminado correctamente.")
     return redirect(url_for("index"))
@@ -722,30 +780,35 @@ def toggle_progress(task_id):
     update_user_activity(user)
     day_filter = request.args.get("day")    
 
-    conn = sqlite3.connect("database.db")
+    conn = get_db_connection()
     cursor = conn.cursor()
-    cursor.execute("SELECT status FROM progress WHERE email = ? AND task_id = ?", (user, task_id))
+    is_postgres = bool(os.environ.get("DATABASE_URL"))
+    ph = "%s" if is_postgres else "?"
+
+    cursor.execute(f"SELECT status FROM progress WHERE email = {ph} AND task_id = {ph}", (user, task_id))
     row = cursor.fetchone()
 
     if row is None:
-        cursor.execute("INSERT INTO progress (email, task_id, status) VALUES (?, ?, ?)", (user, task_id, "COMPLETADO"))
+        cursor.execute(f"INSERT INTO progress (email, task_id, status) VALUES ({ph}, {ph}, {ph})", (user, task_id, "COMPLETADO"))
         flash("¡Completado y movido al historial! 🏆")
     else:
         current_status = row[0]
         new_status = "PENDIENTE" if current_status == "COMPLETADO" else "COMPLETADO"
-        cursor.execute("UPDATE progress SET status = ? WHERE email = ? AND task_id = ?", (new_status, user, task_id))
+        cursor.execute(f"UPDATE progress SET status = {ph} WHERE email = {ph} AND task_id = {ph}", (new_status, user, task_id))
         if new_status == "COMPLETADO":
             flash("¡Marcado como completado! 🎉")
         else:
             flash("Devuelto a pendientes ↩️")
 
     conn.commit()
+    cursor.close()
     conn.close()
 
     if day_filter:
         return redirect(url_for("filter_by_day", day_name=day_filter))
     return redirect(url_for("index"))
+
 if __name__ == "__main__":
-    init_db()  # Esto asegura que se cree la base de datos si no existe
+    init_db()
     port = int(os.environ.get("PORT", 5000))
     app.run(host="0.0.0.0", port=port, debug=True)
