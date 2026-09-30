@@ -77,9 +77,7 @@ def init_db():
     """)
     
     conn.commit()
-    cursor.close()
-    conn.close()
-    
+
     # Insertar elementos iniciales si la tabla está vacía
     cursor.execute("SELECT COUNT(*) FROM tasks")
     count = cursor.fetchone()[0]
