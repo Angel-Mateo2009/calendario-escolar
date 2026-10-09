@@ -1,9 +1,11 @@
 import os
+import json
 import psycopg2
+import logging
 from html import escape
 import hashlib
-from datetime import datetime
-from flask import Flask, render_template_string, request, redirect, url_for, session, flash
+from datetime import date, datetime
+from flask import Flask, render_template_string, request, redirect, url_for, session, flash, jsonify, send_from_directory
 
 app = Flask(__name__)
 app.secret_key = "tu_clave_secreta_aqui"  # Mantén tu clave secreta
@@ -123,6 +125,25 @@ def init_db():
             PRIMARY KEY (email, rank)
         )
     """)
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS push_subscriptions (
+            endpoint TEXT PRIMARY KEY,
+            email TEXT NOT NULL,
+            p256dh TEXT NOT NULL,
+            auth TEXT NOT NULL,
+            created_at TEXT NOT NULL
+        )
+    """)
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS task_push_notifications (
+            email TEXT NOT NULL,
+            task_id INTEGER NOT NULL,
+            due_date TEXT NOT NULL,
+            endpoint TEXT NOT NULL,
+            sent_at TEXT NOT NULL,
+            PRIMARY KEY (email, task_id, due_date, endpoint)
+        )
+    """)
     
     conn.commit()
 
@@ -209,6 +230,19 @@ HTML_TEMPLATE = """
         @keyframes avatar-breathe { 0%, 100% { transform: translateY(0) scale(1); } 50% { transform: translateY(-5px) scale(1.012); } }
         @keyframes avatar-wave { 0%, 72%, 100% { transform: rotate(0deg); } 82% { transform: rotate(-7deg); } 90% { transform: rotate(3deg); } }
         @media (prefers-reduced-motion: reduce) { .avatar-3d-turn, .avatar-3d-bob, .avatar-arm-right { animation: none; } }
+        @media (max-width: 640px) {
+            html { -webkit-text-size-adjust: 100%; }
+            body { overflow-x: clip; }
+            header nav { flex-wrap: nowrap !important; overflow-x: auto; overscroll-behavior-x: contain; scrollbar-width: thin; padding: 0 0 6px; }
+            header nav a { flex: 0 0 auto; min-height: 42px; display: inline-flex; align-items: center; }
+            main { min-width: 0; }
+            .calendar-desk { border-width: 2px; border-radius: 1.25rem; }
+            .calendar-header-bar { padding: 1rem; }
+            .avatar-3d-stage { max-width: 100%; }
+            button, input, select, textarea { font-size: 16px; }
+            button, a { touch-action: manipulation; }
+            .overflow-x-auto { -webkit-overflow-scrolling: touch; }
+        }
         .school-card-admin { background: #ffffff; border: 2px solid #fdba74; box-shadow: 0 10px 25px -5px rgba(249, 115, 22, 0.15); }
         .calendar-desk {
             background: #ffffff; border: 4px solid #38bdf8; border-radius: 2rem; box-shadow: 0 20px 35px -10px rgba(56, 189, 248, 0.2); position: relative; overflow: hidden;
@@ -308,6 +342,7 @@ HTML_TEMPLATE = """
             <a href="/ranking" class="text-xs font-bold bg-yellow-100 text-yellow-900 px-3 py-2 rounded-xl">🏆 Ranking</a>
             <a href="/profile" class="text-xs font-bold bg-purple-100 text-purple-900 px-3 py-2 rounded-xl">👤 Mi perfil</a>
             <a href="/customize" class="text-xs font-bold bg-red-100 text-red-900 px-3 py-2 rounded-xl">🎨 Personalizar avatar</a>
+            <button id="push-notification-control" type="button" class="text-xs font-bold bg-emerald-100 text-emerald-900 px-3 py-2 rounded-xl">🔔 Activar recordatorios</button>
         </nav>
         {% endif %}
     </header>
@@ -640,6 +675,7 @@ HTML_TEMPLATE = """
     <footer class="text-center p-4 text-xs font-medium text-sky-800/70 border-t border-sky-200">
         Academia La Dolorosa · Calendario Escolar  Hecho por Angel Mateo Chamba Albito🍎🧩
     </footer>
+    <script src="{{ url_for('static', filename='push.js') }}" defer></script>
     <script type="module" src="{{ url_for('static', filename='avatar3d.js') }}"></script>
 </body>
 </html>
@@ -993,7 +1029,7 @@ def find_equipped(value, kind=None):
         return item
     return next((x for x in SHOP_ITEMS if x["emoji"] == value and (kind is None or x["kind"] == kind)), None)
 
-def avatar_figure(avatar, accessory="", pet="", phrase="", compact=False, full_body=False):
+def avatar_figure(avatar, accessory="", pet="", phrase="", compact=False, full_body=False, render_3d=True):
     equipment = accessory if isinstance(accessory, dict) else {}
     legacy_wearable = accessory if isinstance(accessory, str) else ""
     wearable = find_equipped(equipment.get("outfit", legacy_wearable), "accessory")
@@ -1056,7 +1092,7 @@ def avatar_figure(avatar, accessory="", pet="", phrase="", compact=False, full_b
     environment_art=f"<div class='avatar-environment{environment_class}' aria-hidden='true'></div>" if background_item else ""
     effect_class = f" effect-{profile_effect['id']}" if profile_effect else ""
     effect_badge = "<span class='profile-item-title'>🏅 Imparable</span>" if profile_effect and profile_effect["id"]=="effect_title" else ""
-    webgl = f"<canvas class='avatar-webgl' data-view='{'full' if full_body else 'compact'}' data-skin='{skin}' data-shirt='{shirt_color}' data-shirt-equipped={'true' if shirt_item or wearable else 'false'} data-pants='{pants_color}' data-pants-equipped={'true' if pants_item else 'false'} data-shoes='{shoes_color}' data-shoes-equipped={'true' if shoes_item else 'false'} data-hat='{escape(head_item['id'] if head_item else '')}' data-eyewear='{escape(eye_item['id'] if eye_item else '')}' data-scarf='{escape(neck_item['id'] if neck_item else '')}' data-scarf-color='{escape(neck_item.get('color','#b91c1c') if neck_item else '#b91c1c')}' data-pet='{escape(companion['id'] if companion else '')}' data-aura='{escape(aura_item['id'] if aura_item else '')}' data-aura-color='{escape(aura_item.get('color','#facc15') if aura_item else '#facc15')}' data-entry='{escape(equipment.get('entry',''))}' data-background='{escape(background_item['id'] if background_item else '')}' data-tier='{visual_tier.lower()}' data-gold={'true' if wearable and wearable['id']=='skin_gold' else 'false'} aria-label='Personaje humano 3D animado'></canvas>"
+    webgl = f"<canvas class='avatar-webgl' data-view='{'full' if full_body else 'compact'}' data-skin='{skin}' data-shirt='{shirt_color}' data-shirt-equipped={'true' if shirt_item or wearable else 'false'}' data-pants='{pants_color}' data-pants-equipped={'true' if pants_item else 'false'}' data-shoes='{shoes_color}' data-shoes-equipped={'true' if shoes_item else 'false'}' data-hat='{escape(head_item['id'] if head_item else '')}' data-eyewear='{escape(eye_item['id'] if eye_item else '')}' data-scarf='{escape(neck_item['id'] if neck_item else '')}' data-scarf-color='{escape(neck_item.get('color','#b91c1c') if neck_item else '#b91c1c')}' data-pet='{escape(companion['id'] if companion else '')}' data-aura='{escape(aura_item['id'] if aura_item else '')}' data-aura-color='{escape(aura_item.get('color','#facc15') if aura_item else '#facc15')}' data-entry='{escape(equipment.get('entry',''))}' data-background='{escape(background_item['id'] if background_item else '')}' data-tier='{visual_tier.lower()}' data-gold={'true' if wearable and wearable['id']=='skin_gold' else 'false'} aria-label='Personaje humano 3D animado'></canvas>" if render_3d else ""
     outer_aura=f"has-aura aura-{aura_item['id']}" if aura_item else ""
     environment_outer=f"has-background background-{background_item['id']}" if background_item else ""
     tier_class=f"visual-tier-{visual_tier.lower()}"
@@ -1079,12 +1115,53 @@ def collection_level(items):
     if value >= 400: return "Explorador", value
     return "Aprendiz", value
 
-PAGE_TEMPLATE = """<!doctype html><html lang='es'><head><meta charset='utf-8'><meta name='viewport' content='width=device-width,initial-scale=1'><script src='https://cdn.tailwindcss.com'></script><style>.avatar-3d-stage{position:relative;perspective:900px;isolation:isolate;filter:drop-shadow(0 16px 16px rgba(120,53,15,.18))}.avatar-3d-stage:before{content:'';position:absolute;inset:18% -20% 5%;border-radius:50%;background:radial-gradient(ellipse,rgba(253,224,71,.34),rgba(220,38,38,.04) 65%,transparent 72%);z-index:-1}.avatar-3d-turn{height:100%;transform-style:preserve-3d;animation:avatar-turn 7s ease-in-out infinite alternate}.avatar-3d-bob{position:relative;height:100%;animation:avatar-breathe 2.8s ease-in-out infinite;transform-origin:50% 100%}.avatar-model{overflow:visible;filter:drop-shadow(0 5px 4px rgba(15,23,42,.17));transition:opacity .2s}.avatar-webgl{position:absolute;inset:0;width:100%;height:100%;z-index:2}.avatar-webgl-ready .avatar-fallback,.avatar-webgl-ready .avatar-wearable,.avatar-webgl-ready .avatar-pet-badge{opacity:0}.avatar-arm{transform-box:fill-box;transform-origin:50% 12%}.avatar-arm-right{animation:avatar-wave 3.4s ease-in-out infinite}.top-intro{position:fixed;inset:0;z-index:90;display:grid;place-items:center;overflow:hidden;background:radial-gradient(circle at center,#991b1b 0,#450a0a 56%,#160606 100%);color:white;pointer-events:none;animation:top-intro-out 3.15s ease-in-out forwards}.top-intro:before,.top-intro:after{content:'';position:absolute;inset:-35%;background:conic-gradient(from 0deg,transparent 0 8deg,rgba(250,204,21,.28) 9deg 11deg,transparent 12deg 30deg);animation:top-rays 1.2s ease-out both}.top-intro:after{transform:rotate(13deg);opacity:.5}.top-intro-card{position:relative;text-align:center;animation:top-boom .65s cubic-bezier(.17,.89,.32,1.49) both}.top-intro-medal{font-size:5rem;filter:drop-shadow(0 0 24px #facc15);animation:medal-pulse .65s ease-in-out infinite alternate}.top-intro-title{color:#fde047;text-shadow:0 3px 0 #991b1b,0 0 25px #facc15}.top-bolt{position:absolute;width:100px;height:180px;color:#fff9b1;filter:drop-shadow(0 0 15px #fff) drop-shadow(0 0 30px #facc15);animation:bolt-flash .55s ease-in-out 2 both}.top-bolt-left{left:8%;top:12%}.top-bolt-right{right:8%;bottom:10%;transform:rotate(180deg)}@keyframes avatar-turn{0%{transform:rotateY(-8deg) rotateZ(-1deg)}100%{transform:rotateY(8deg) rotateZ(1deg)}}@keyframes avatar-breathe{0%,100%{transform:translateY(0) scale(1)}50%{transform:translateY(-5px) scale(1.012)}}@keyframes avatar-wave{0%,72%,100%{transform:rotate(0)}82%{transform:rotate(-7deg)}90%{transform:rotate(3deg)}}@keyframes top-rays{0%{transform:scale(.2) rotate(0);opacity:0}35%{opacity:1}100%{transform:scale(1.4) rotate(25deg);opacity:0}}@keyframes top-boom{0%{transform:scale(.08);opacity:0}70%{transform:scale(1.12);opacity:1}100%{transform:scale(1);opacity:1}}@keyframes medal-pulse{to{transform:scale(1.12) rotate(5deg)}}@keyframes bolt-flash{0%,100%{opacity:0;transform:translateY(-12px) scale(.8)}20%,55%{opacity:1;transform:translateY(0) scale(1)}}@keyframes top-intro-out{0%,76%{opacity:1;visibility:visible}100%{opacity:0;visibility:hidden}}@media(prefers-reduced-motion:reduce){.avatar-3d-turn,.avatar-3d-bob,.avatar-arm-right,.top-intro,.top-intro *{animation:none!important}}</style><title>{{ title }}</title></head><body class='min-h-screen bg-gradient-to-br from-amber-50 via-red-50 to-yellow-50 text-slate-800'>
+PAGE_TEMPLATE = """<!doctype html><html lang='es'><head><meta charset='utf-8'><meta name='viewport' content='width=device-width,initial-scale=1'><script src='https://cdn.tailwindcss.com'></script><style>.avatar-3d-stage{position:relative;perspective:900px;isolation:isolate;filter:drop-shadow(0 16px 16px rgba(120,53,15,.18))}.avatar-3d-stage:before{content:'';position:absolute;inset:18% -20% 5%;border-radius:50%;background:radial-gradient(ellipse,rgba(253,224,71,.34),rgba(220,38,38,.04) 65%,transparent 72%);z-index:-1}.avatar-3d-turn{height:100%;transform-style:preserve-3d;animation:avatar-turn 7s ease-in-out infinite alternate}.avatar-3d-bob{position:relative;height:100%;animation:avatar-breathe 2.8s ease-in-out infinite;transform-origin:50% 100%}.avatar-model{overflow:visible;filter:drop-shadow(0 5px 4px rgba(15,23,42,.17));transition:opacity .2s}.avatar-webgl{position:absolute;inset:0;width:100%;height:100%;z-index:2}.avatar-webgl-ready .avatar-fallback,.avatar-webgl-ready .avatar-wearable,.avatar-webgl-ready .avatar-pet-badge{opacity:0}.avatar-arm{transform-box:fill-box;transform-origin:50% 12%}.avatar-arm-right{animation:avatar-wave 3.4s ease-in-out infinite}.top-intro{position:fixed;inset:0;z-index:90;display:grid;place-items:center;overflow:hidden;background:radial-gradient(circle at center,#991b1b 0,#450a0a 56%,#160606 100%);color:white;pointer-events:none;animation:top-intro-out 3.15s ease-in-out forwards}.top-intro:before,.top-intro:after{content:'';position:absolute;inset:-35%;background:conic-gradient(from 0deg,transparent 0 8deg,rgba(250,204,21,.28) 9deg 11deg,transparent 12deg 30deg);animation:top-rays 1.2s ease-out both}.top-intro:after{transform:rotate(13deg);opacity:.5}.top-intro-card{position:relative;text-align:center;animation:top-boom .65s cubic-bezier(.17,.89,.32,1.49) both}.top-intro-medal{font-size:5rem;filter:drop-shadow(0 0 24px #facc15);animation:medal-pulse .65s ease-in-out infinite alternate}.top-intro-title{color:#fde047;text-shadow:0 3px 0 #991b1b,0 0 25px #facc15}.top-bolt{position:absolute;width:100px;height:180px;color:#fff9b1;filter:drop-shadow(0 0 15px #fff) drop-shadow(0 0 30px #facc15);animation:bolt-flash .55s ease-in-out 2 both}.top-bolt-left{left:8%;top:12%}.top-bolt-right{right:8%;bottom:10%;transform:rotate(180deg)}@keyframes avatar-turn{0%{transform:rotateY(-8deg) rotateZ(-1deg)}100%{transform:rotateY(8deg) rotateZ(1deg)}}@keyframes avatar-breathe{0%,100%{transform:translateY(0) scale(1)}50%{transform:translateY(-5px) scale(1.012)}}@keyframes avatar-wave{0%,72%,100%{transform:rotate(0)}82%{transform:rotate(-7deg)}90%{transform:rotate(3deg)}}@keyframes top-rays{0%{transform:scale(.2) rotate(0);opacity:0}35%{opacity:1}100%{transform:scale(1.4) rotate(25deg);opacity:0}}@keyframes top-boom{0%{transform:scale(.08);opacity:0}70%{transform:scale(1.12);opacity:1}100%{transform:scale(1);opacity:1}}@keyframes medal-pulse{to{transform:scale(1.12) rotate(5deg)}}@keyframes bolt-flash{0%,100%{opacity:0;transform:translateY(-12px) scale(.8)}20%,55%{opacity:1;transform:translateY(0) scale(1)}}@keyframes top-intro-out{0%,76%{opacity:1;visibility:visible}100%{opacity:0;visibility:hidden}}@media(prefers-reduced-motion:reduce){.avatar-3d-turn,.avatar-3d-bob,.avatar-arm-right,.top-intro,.top-intro *{animation:none!important}}@media(max-width:640px){html{-webkit-text-size-adjust:100%}body{overflow-x:clip}header nav{flex-wrap:nowrap!important;overflow-x:auto;overscroll-behavior-x:contain;scrollbar-width:thin;padding-bottom:6px}header nav a{flex:0 0 auto;min-height:42px;display:inline-flex;align-items:center}main{min-width:0}.avatar-3d-stage{max-width:100%}button,a{touch-action:manipulation}.overflow-x-auto{-webkit-overflow-scrolling:touch}.entry-caption{max-width:90%;overflow:hidden;text-overflow:ellipsis}.profile-arrival,.profile-idle{min-width:0}} </style><title>{{ title }}</title></head><body class='min-h-screen bg-gradient-to-br from-amber-50 via-red-50 to-yellow-50 text-slate-800'>
 <header class='bg-white/90 border-b border-red-200 p-4'><div class='max-w-5xl mx-auto flex justify-between items-center'><a class='font-black text-red-900' href='/'>🏫 Academia La Dolorosa</a><div class='text-sm font-bold'>🪙 {{ coins }}　💎 {{ gems }}　⭐ {{ xp }} XP</div></div><nav class='max-w-5xl mx-auto flex gap-2 mt-3 text-xs font-bold'><a class='bg-red-100 text-red-900 px-3 py-2 rounded-xl' href='/'>📚 Calendario</a><a class='bg-amber-100 px-3 py-2 rounded-xl' href='/shop'>🛍️ Tienda</a><a class='bg-yellow-100 px-3 py-2 rounded-xl' href='/ranking'>🏆 Ranking</a><a class='bg-purple-100 px-3 py-2 rounded-xl' href='/profile'>👤 Mi perfil</a></nav></header>
 <main class='max-w-5xl mx-auto p-4 md:p-8'><div class='mb-5'><a href='/' class='text-sky-700 font-bold text-sm'>← Volver al calendario</a><h1 class='text-3xl font-black mt-3'>{{ title }}</h1><p class='text-sm text-slate-600'>{{ subtitle }}</p></div>{% with messages=get_flashed_messages() %}{% for message in messages %}<div class='bg-emerald-100 border border-emerald-300 rounded-xl p-3 mb-4'>{{ message }}</div>{% endfor %}{% endwith %}{{ body|safe }}</main><script type='importmap'>{"imports":{"three":"https://cdn.jsdelivr.net/npm/three@0.186.0/build/three.module.js"}}</script><script type='module' src='{{ url_for("static", filename="avatar3d.js") }}'></script></body></html>"""
 
 def student_only():
     return bool(session.get("user") and session.get("role") == "STUDENT")
+
+@app.route("/service-worker.js")
+def push_service_worker():
+    response = send_from_directory(os.path.join(app.root_path, "static"), "push-sw.js", mimetype="application/javascript")
+    response.headers["Service-Worker-Allowed"] = "/"
+    response.headers["Cache-Control"] = "no-cache"
+    return response
+
+@app.get("/push/config")
+def push_config():
+    public_key = os.environ.get("VAPID_PUBLIC_KEY", "").strip()
+    return jsonify({"enabled": bool(public_key), "publicKey": public_key})
+
+@app.post("/push/subscribe")
+def push_subscribe():
+    if not student_only():
+        return jsonify({"error": "Inicia sesión como estudiante para activar los avisos."}), 401
+    payload = request.get_json(silent=True) or {}
+    endpoint = str(payload.get("endpoint", ""))
+    keys = payload.get("keys") or {}
+    p256dh, auth = str(keys.get("p256dh", "")), str(keys.get("auth", ""))
+    if not endpoint.startswith("https://") or not p256dh or not auth:
+        return jsonify({"error": "La suscripción de notificaciones no es válida."}), 400
+    conn = get_db_connection(); cur = conn.cursor(); ph = "%s" if os.environ.get("DATABASE_URL") else "?"
+    cur.execute(
+        f"INSERT INTO push_subscriptions(endpoint,email,p256dh,auth,created_at) VALUES({ph},{ph},{ph},{ph},{ph}) ON CONFLICT(endpoint) DO UPDATE SET email=excluded.email,p256dh=excluded.p256dh,auth=excluded.auth,created_at=excluded.created_at",
+        (endpoint, session["user"], p256dh, auth, datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
+    )
+    conn.commit(); conn.close()
+    return jsonify({"ok": True})
+
+@app.post("/push/unsubscribe")
+def push_unsubscribe():
+    if not student_only():
+        return jsonify({"error": "Inicia sesión como estudiante."}), 401
+    payload = request.get_json(silent=True) or {}
+    endpoint = str(payload.get("endpoint", ""))
+    conn = get_db_connection(); cur = conn.cursor(); ph = "%s" if os.environ.get("DATABASE_URL") else "?"
+    cur.execute(f"DELETE FROM push_subscriptions WHERE endpoint={ph} AND email={ph}", (endpoint, session["user"]))
+    conn.commit(); conn.close()
+    return jsonify({"ok": True})
 
 def get_student_stats(email, cursor=None):
     own = cursor is None
@@ -1117,6 +1194,8 @@ def equipment_with_legacy(equipment, legacy_accessory):
 
 def render_student_page(title, subtitle, body, email=None):
     stats = get_student_stats(email or session["user"])
+    push_control = "<button id='push-notification-control' type='button' class='fixed bottom-4 right-4 z-50 rounded-full border-2 border-emerald-200 bg-emerald-700 px-4 py-3 text-sm font-black text-white shadow-xl'>🔔 Activar recordatorios</button><script src='/static/push.js' defer></script>"
+    body = push_control + body
     return render_template_string(PAGE_TEMPLATE, title=title, subtitle=subtitle, body=body,
         xp=stats[0], coins=stats[1], gems=stats[2])
 
@@ -1275,7 +1354,7 @@ def ranking():
     body="<div class='overflow-x-auto bg-white rounded-2xl shadow border-2 border-red-200'><table class='w-full text-left'><thead class='bg-gradient-to-r from-red-800 to-red-600 text-yellow-100'><tr><th class='p-3'>Puesto</th><th class='p-3'>Estudiante</th><th class='p-3'>Tareas</th><th class='p-3'>Inicios</th><th class='p-3'>Puntos</th><th class='p-3'>Premio</th><th class='p-3'></th></tr></thead><tbody>"
     for pos,s in enumerate(students,1):
         prize=RANK_PRIZES.get(pos,(0,0)); top=pos<=5
-        figure=avatar_figure(s['avatar'],s['equipment'],s['pet'],s['phrase'],compact=True)
+        figure=avatar_figure(s['avatar'],s['equipment'],s['pet'],s['phrase'],compact=True,render_3d=False)
         body+=f"<tr class='border-t {'bg-yellow-100 font-bold' if top else 'hover:bg-red-50'}'><td class='p-3'>{'👑 ' if top else ''}{pos}</td><td class='p-3'><div class='flex items-center gap-3'>{figure}<div><a class='font-black text-red-800 hover:text-red-600 underline decoration-yellow-500 decoration-2' href='/profile/{pos}'>{escape(str(s['email']))}</a><div class='text-xs text-slate-600'>⭐ {s['xp']} XP</div></div></div></td><td class='p-3'>{s['completed']}</td><td class='p-3'>{s['logins']}</td><td class='p-3 font-black'>{s['score']}</td><td class='p-3'>{'🪙 '+str(prize[0])+' 💎 '+str(prize[1]) if top else '—'}</td><td class='p-3'><a class='rounded-xl bg-red-700 px-3 py-2 font-bold text-white hover:bg-red-600' href='/profile/{pos}'>Ver ficha</a></td></tr>"
     body+="</tbody></table></div><p class='text-xs text-slate-500 mt-3'>Puntos del ranking = tareas completadas + inicios de sesión. Los premios se entregan una sola vez por estudiante y puesto.</p>"
     return render_student_page("Ranking de estudiantes","Ordenado por tareas completadas más inicios de sesión.",body)
