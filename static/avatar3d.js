@@ -107,7 +107,8 @@ function createAvatar(THREE, GLTFLoader, canvas) {
     camera.lookAt(0, compactView?2.22:1.52, 0);
 
     const renderer = new THREE.WebGLRenderer({ canvas, alpha: true, antialias: true, powerPreference: "low-power" });
-    renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 1.75));
+    const mobileDevice=window.matchMedia("(max-width: 640px), (pointer: coarse)").matches;
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, mobileDevice ? 1.1 : 1.6));
     renderer.setSize(width, height, false);
     renderer.outputColorSpace = THREE.SRGBColorSpace;
     renderer.toneMapping = THREE.ACESFilmicToneMapping;
@@ -522,8 +523,15 @@ function createAvatar(THREE, GLTFLoader, canvas) {
 
     const clock = new THREE.Clock();
     let frame = 0;
+    let lastFrameAt=0;
     const animate = () => {
-      frame = requestAnimationFrame(animate);
+      frame = requestAnimationFrame((now)=>{
+        if(mobileDevice&&now-lastFrameAt<33){animate();return;}
+        lastFrameAt=now;
+        renderFrame();
+      });
+    };
+    const renderFrame=()=>{
       const delta=clock.getDelta();
       const t = clock.elapsedTime;
       if(importedMixer)importedMixer.update(Math.min(delta,.05));
@@ -564,6 +572,7 @@ function createAvatar(THREE, GLTFLoader, canvas) {
       else if(entryId==="entry_pistols"){leftArm.rotation.z=-.26+Math.sin(t*2.5)*.1;rightArm.rotation.z=.26+Math.sin(t*2.5+1)*.1;}
       else if(tier==="exclusivo"){rightArm.rotation.z=-.12-Math.sin(t*1.7)*.24;leftArm.rotation.z=Math.sin(t*1.7+1)*.22;}
       renderer.render(scene, camera);
+      animate();
     };
     const resize = () => {
       const w = Math.max(stage.clientWidth, 1);
@@ -574,11 +583,19 @@ function createAvatar(THREE, GLTFLoader, canvas) {
     };
     new ResizeObserver(resize).observe(stage);
     stage.classList.add("avatar-webgl-ready");
-    animate();
     document.addEventListener("visibilitychange", () => {
-      if (document.hidden) cancelAnimationFrame(frame);
-      else animate();
+      if (document.hidden) { cancelAnimationFrame(frame); clock.stop(); }
+      else if(clock.running===false) { clock.start(); lastFrameAt=0; animate(); }
     });
+    if("IntersectionObserver" in window){
+      const visibility=new IntersectionObserver(([entry])=>{
+        if(entry.isIntersecting&&!document.hidden&&clock.running===false){clock.start();lastFrameAt=0;animate();}
+        else if(!entry.isIntersecting&&clock.running){cancelAnimationFrame(frame);clock.stop();}
+      },{rootMargin:"80px"});
+      visibility.observe(stage);
+      stage.addEventListener("DOMNodeRemoved",()=>visibility.disconnect(),{once:true});
+    }
+    if(!("IntersectionObserver" in window)||stage.getBoundingClientRect().top<innerHeight+80){clock.start();animate();}
   } catch (error) {
     console.warn("El avatar 3D no pudo inicializarse; se conserva la ilustración de respaldo.", error);
   }
