@@ -1,6 +1,6 @@
 name: Recordatorios push de tareas
 
-on:
+"on":
   schedule:
     # GitHub's scheduled runs can be delayed; avoid starting exactly on the hour.
     - cron: "17 13 * * *"
