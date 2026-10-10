@@ -1,4 +1,4 @@
-"""Send scheduled push reminders for tasks due tomorrow in Ecuador local time."""
+"""Send one illustrated push summary per device and scheduled run."""
 import json
 import logging
 import os
@@ -11,20 +11,38 @@ from app import get_db_connection
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 LOCAL_ZONE = ZoneInfo("America/Guayaquil")
+DAYS_ES = ("lunes", "martes", "miércoles", "jueves", "viernes", "sábado", "domingo")
+MONTHS_ES = (
+    "enero", "febrero", "marzo", "abril", "mayo", "junio",
+    "julio", "agosto", "septiembre", "octubre", "noviembre", "diciembre"
+)
+
+
+def next_reminder_date(today):
+    # Friday, Saturday and Sunday all target the following Monday.
+    days_ahead = 7 - today.weekday() if today.weekday() >= 4 else 1
+    return today + timedelta(days=days_ahead)
+
+
+def spanish_date(value):
+    return f"{DAYS_ES[value.weekday()]} {value.day} de {MONTHS_ES[value.month - 1]}"
 
 
 def main():
     private_key = os.environ.get("VAPID_PRIVATE_KEY", "").strip()
     claims_email = os.environ.get("VAPID_CLAIMS_EMAIL", "").strip()
     if not private_key or not claims_email:
-        raise RuntimeError("Configura VAPID_PRIVATE_KEY y VAPID_CLAIMS_EMAIL en el Cron Job de Render.")
+        raise RuntimeError("Configura VAPID_PRIVATE_KEY y VAPID_CLAIMS_EMAIL en los secretos de GitHub Actions.")
 
-    tomorrow = datetime.now(LOCAL_ZONE).date() + timedelta(days=1)
-    due_date = tomorrow.isoformat()
+    now = datetime.now(LOCAL_ZONE)
+    due_day = next_reminder_date(now.date())
+    due_date = due_day.isoformat()
+    due_label = spanish_date(due_day)
     vapid_subject = claims_email if claims_email.startswith(("mailto:", "https://")) else f"mailto:{claims_email}"
     run_key = os.environ.get("REMINDER_RUN_KEY", "").strip()
     if not run_key:
-        run_key = f"manual-{datetime.now(LOCAL_ZONE).strftime('%Y-%m-%d-%H%M')}"
+        run_key = f"manual-{now.strftime('%Y-%m-%d-%H%M')}"
+
     conn = get_db_connection()
     cur = conn.cursor()
     ph = "%s" if os.environ.get("DATABASE_URL") else "?"
@@ -40,101 +58,75 @@ def main():
         )
     """)
     conn.commit()
+
     cur.execute(f"SELECT id, subject, title FROM tasks WHERE due_date={ph}", (due_date,))
     tasks = cur.fetchall()
     cur.execute("SELECT email, endpoint, p256dh, auth FROM push_subscriptions")
     subscriptions = cur.fetchall()
     sent = 0
 
-    for subscription in subscriptions:
-        email, endpoint, p256dh, auth = subscription
-        pending_tasks = 0
+    for email, endpoint, p256dh, auth in subscriptions:
+        # One notification per endpoint and scheduled time, containing every pending task.
+        cur.execute(
+            f"SELECT 1 FROM scheduled_task_push_notifications WHERE email={ph} AND task_id=0 AND due_date={ph} AND endpoint={ph} AND run_key={ph}",
+            (email, due_date, endpoint, run_key)
+        )
+        if cur.fetchone():
+            continue
+
+        pending_tasks = []
         for task_id, subject, title in tasks:
-            # Do not remind students about work they already marked complete.
             cur.execute(
                 f"SELECT 1 FROM progress WHERE email={ph} AND task_id={ph} AND status='COMPLETADO' LIMIT 1",
                 (email, task_id)
             )
-            if cur.fetchone():
-                continue
-            pending_tasks += 1
-            cur.execute(
-                f"SELECT 1 FROM scheduled_task_push_notifications WHERE email={ph} AND task_id={ph} AND due_date={ph} AND endpoint={ph} AND run_key={ph}",
-                (email, task_id, due_date, endpoint, run_key)
-            )
-            if cur.fetchone():
-                continue
-
-            payload = {
-                "title": f"Mañana vence · {subject}",
-                "body": title,
-                "tag": f"tarea-{task_id}-{due_date}",
-                "url": "/"
-            }
-            try:
-                webpush(
-                    subscription_info={"endpoint": endpoint, "keys": {"p256dh": p256dh, "auth": auth}},
-                    data=json.dumps(payload, ensure_ascii=False),
-                    vapid_private_key=private_key,
-                    vapid_claims={"sub": vapid_subject},
-                    ttl=60 * 60 * 24
-                )
-            except WebPushException as error:
-                response = getattr(error, "response", None)
-                status = getattr(response, "status_code", None)
-                logging.warning("Push falló para %s (HTTP %s): %s", email, status, error)
-                if status in (404, 410):
-                    cur.execute(f"DELETE FROM push_subscriptions WHERE endpoint={ph}", (endpoint,))
-                    conn.commit()
-                continue
-
-            cur.execute(
-                f"INSERT INTO scheduled_task_push_notifications(email,task_id,due_date,endpoint,run_key,sent_at) VALUES({ph},{ph},{ph},{ph},{ph},{ph}) ON CONFLICT(email,task_id,due_date,endpoint,run_key) DO NOTHING",
-                (email, task_id, due_date, endpoint, run_key, datetime.now(LOCAL_ZONE).isoformat(timespec="seconds"))
-            )
-            conn.commit()
-            sent += 1
-
-        # Send a daily status update when the student has no work due tomorrow.
-        # task_id=0 is reserved as the daily no-tasks marker (real task IDs start at 1).
-        if pending_tasks == 0:
-            cur.execute(
-                f"SELECT 1 FROM scheduled_task_push_notifications WHERE email={ph} AND task_id=0 AND due_date={ph} AND endpoint={ph} AND run_key={ph}",
-                (email, due_date, endpoint, run_key)
-            )
             if not cur.fetchone():
-                payload = {
-                    "title": "Sin tareas pendientes mañana",
-                    "body": "No tienes tareas por entregar mañana. ¡Que tengas un buen día!",
-                    "tag": f"sin-tareas-{due_date}",
-                    "url": "/"
-                }
-                try:
-                    webpush(
-                        subscription_info={"endpoint": endpoint, "keys": {"p256dh": p256dh, "auth": auth}},
-                        data=json.dumps(payload, ensure_ascii=False),
-                        vapid_private_key=private_key,
-                        vapid_claims={"sub": vapid_subject},
-                        ttl=60 * 60 * 24
-                    )
-                except WebPushException as error:
-                    response = getattr(error, "response", None)
-                    status = getattr(response, "status_code", None)
-                    logging.warning("Push diario falló para %s (HTTP %s): %s", email, status, error)
-                    if status in (404, 410):
-                        cur.execute(f"DELETE FROM push_subscriptions WHERE endpoint={ph}", (endpoint,))
-                        conn.commit()
-                    continue
+                pending_tasks.append((str(subject), str(title)))
 
-                cur.execute(
-                    f"INSERT INTO scheduled_task_push_notifications(email,task_id,due_date,endpoint,run_key,sent_at) VALUES({ph},0,{ph},{ph},{ph},{ph}) ON CONFLICT(email,task_id,due_date,endpoint,run_key) DO NOTHING",
-                    (email, due_date, endpoint, run_key, datetime.now(LOCAL_ZONE).isoformat(timespec="seconds"))
-                )
+        if pending_tasks:
+            title = f"Tienes tareas para el {due_label}"
+            lines = ["Revisa ahora tus tareas pendientes."]
+            lines.extend(f"• {subject}: {task_title}" for subject, task_title in pending_tasks[:6])
+            if len(pending_tasks) > 6:
+                lines.append(f"Y {len(pending_tasks) - 6} tareas más.")
+            body = "\n".join(lines)[:900]
+        else:
+            title = f"No tienes tareas para el {due_label}"
+            body = "Revisa ahora tus tareas pendientes y organiza tu semana."
+
+        payload = {
+            "title": title,
+            "body": body,
+            "image": "/static/notification-tasks.svg",
+            "tag": f"academia-tareas-{due_date}-{run_key}",
+            "url": "/"
+        }
+        try:
+            webpush(
+                subscription_info={"endpoint": endpoint, "keys": {"p256dh": p256dh, "auth": auth}},
+                data=json.dumps(payload, ensure_ascii=False),
+                vapid_private_key=private_key,
+                vapid_claims={"sub": vapid_subject},
+                ttl=60 * 60 * 24
+            )
+        except WebPushException as error:
+            response = getattr(error, "response", None)
+            status = getattr(response, "status_code", None)
+            logging.warning("Push falló para %s (HTTP %s): %s", email, status, error)
+            if status in (404, 410):
+                cur.execute(f"DELETE FROM push_subscriptions WHERE endpoint={ph}", (endpoint,))
                 conn.commit()
-                sent += 1
+            continue
+
+        cur.execute(
+            f"INSERT INTO scheduled_task_push_notifications(email,task_id,due_date,endpoint,run_key,sent_at) VALUES({ph},0,{ph},{ph},{ph},{ph}) ON CONFLICT(email,task_id,due_date,endpoint,run_key) DO NOTHING",
+            (email, due_date, endpoint, run_key, now.isoformat(timespec="seconds"))
+        )
+        conn.commit()
+        sent += 1
 
     conn.close()
-    logging.info("Avisos enviados: %s; fecha límite: %s; ejecución: %s", sent, due_date, run_key)
+    logging.info("Avisos únicos enviados: %s; fecha consultada: %s; ejecución: %s", sent, due_date, run_key)
 
 
 if __name__ == "__main__":
