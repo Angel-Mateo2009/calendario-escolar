@@ -30,6 +30,7 @@
         return;
       }
       registration = await navigator.serviceWorker.getRegistration("/");
+      if (registration) registration.update().catch(() => {});
       const subscription = registration && await registration.pushManager.getSubscription();
       setButton(subscription ? "✅ Recordatorios activados · Desactivar" : "🔔 Activar recordatorios");
     })

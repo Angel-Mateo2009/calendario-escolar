@@ -4,6 +4,7 @@ self.addEventListener("push", (event) => {
   const title = message.title || "Academia La Dolorosa";
   const options = {
     body: message.body || "Tienes una tarea próxima a vencer.",
+    image: message.image || "/static/notification-tasks.svg",
     tag: message.tag || "academia-recordatorio",
     renotify: false,
     data: { url: message.url || "/" }
